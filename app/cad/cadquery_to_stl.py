@@ -53,3 +53,4 @@ def process_all_cadquery_files(cq_code_dir, stl_dir):
         
 # Process all CadQuery files using the new functions
 #process_all_cadquery_files(CADQUERY_DIR, STL_DIR)
+print("hello")
