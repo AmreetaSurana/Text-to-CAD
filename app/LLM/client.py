@@ -1,0 +1,12 @@
+from app.config.settings import AZURE_OPENAI_API_KEY,AZURE_OPENAI_API_VERSION,AZURE_OPENAI_DEPLOYMENT_NAME,AZURE_OPENAI_ENDPOINT
+from openai import AzureOpenAI
+
+
+if not (AZURE_OPENAI_ENDPOINT and AZURE_OPENAI_API_KEY and AZURE_OPENAI_DEPLOYMENT_NAME):
+    raise ValueError("Please set AZURE_OPENAI_ENDPOINT, AZURE_OPENAI_API_KEY, AZURE_OPENAI_DEPLOYMENT_NAME env vars.")
+
+# Initialize Azure OpenAI client
+client = AzureOpenAI(
+    api_key=AZURE_OPENAI_API_KEY, api_version= AZURE_OPENAI_API_VERSION,
+    base_url=f"{AZURE_OPENAI_ENDPOINT}/openai/deployments/{AZURE_OPENAI_DEPLOYMENT_NAME}"
+)
