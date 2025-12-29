@@ -1,6 +1,5 @@
 import os
 import cadquery as cq
-from app.config.settings import CADQUERY_DIR, STL_DIR
 
 def process_single_cadquery_file(file_path, stl_path):
     """Processes a single CadQuery Python file, executes it, and exports the resulting model to an STL file."""
@@ -53,4 +52,5 @@ def process_all_cadquery_files(cq_code_dir, stl_dir):
         
 # Process all CadQuery files using the new functions
 #process_all_cadquery_files(CADQUERY_DIR, STL_DIR)
-print("hello")
+
+#no change needed

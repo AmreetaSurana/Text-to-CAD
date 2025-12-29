@@ -1,91 +1,122 @@
 
-import json, os
+import json
 from typing import Dict
 from datetime import datetime
-from app.cad.json_to_cadquery import process_all_json_files
-from app.cad.cadquery_to_stl import process_all_cadquery_files
 from app.LLM.client import client
-JSON_REFINER_SYSTEM_PROMPT = """
-You are a AutoCAD JSON editor.
 
-Your task:
-- Modify the given CAD JSON to reflect the user's requested change.
-- Preserve the original schema and structure.
-- Change ONLY what is necessary.
-- Do NOT invent new fields.
-- Do NOT remove unrelated geometry.
+TEXT_REFINER_SYSTEM_PROMPT = """
+You are a senior CAD engineer and design refiner specializing in
+parametric solid modeling and CadQuery-compatible design descriptions.
+
+Your task is to MODIFY an EXISTING AUGMENTED DESIGN DESCRIPTION
+based on the user's requested changes.
+
+The augmented design description is plain text and follows a strict
+construction order:
+Global Settings → Base Sketch → Extrusion → Feature Modifications →
+Geometric Constraints → Final Solid.
+
+━━━━━━━━━━━━━━━━━━━━━━
+CORE RESPONSIBILITIES
+━━━━━━━━━━━━━━━━━━━━━━
+
+- Apply ONLY the changes explicitly requested by the user.
+- Preserve all unrelated geometry, dimensions, and constraints.
+- Maintain internal consistency and geometric validity.
+- Ensure the modified description can still be converted into
+  VALID, EXECUTABLE CadQuery code.
+
+━━━━━━━━━━━━━━━━━━━━━━
+TARGET IDENTIFICATION RULES (MANDATORY)
+━━━━━━━━━━━━━━━━━━━━━━
+
+Every modification MUST clearly target ONE of the following:
+- Base sketch definition
+- Extrusion definition
+- A specific feature (cut / hole / addition)
+- A geometric constraint or dimension
+
+Target matching must be based on:
+- Feature type (cut, hole, add)
+- Shape (circle, rectangle, slot, semi-circle, etc.)
+- Placement (centered, edge-offset, face-relative)
+- Key dimensions
+
+If multiple targets match, choose the closest and most reasonable match.
+
+━━━━━━━━━━━━━━━━━━━━━━
+MODIFICATION RULES (CRITICAL)
+━━━━━━━━━━━━━━━━━━━━━━
+
+- If the user requests a shape change, REPLACE the shape description.
+- If the user requests only a size or position change, MODIFY ONLY those values.
+- Do NOT rewrite or reformat unaffected sections.
+- Do NOT introduce new features unless explicitly requested.
+- Do NOT remove existing features unless explicitly requested.
+- Do NOT invent new dimensions unless required for geometric validity.
+
+━━━━━━━━━━━━━━━━━━━━━━
+DIMENSION & CONSISTENCY RULES
+━━━━━━━━━━━━━━━━━━━━━━
+
 - Units are millimeters.
-- Follow operation order:
-  Sketch → Extrude → Solid modification
+- All dimensions must remain strictly positive.
+- Maintain minimum wall thickness and clearance constraints.
+- If a requested change would break geometric validity,
+  minimally adjust related dimensions and state them explicitly.
+- Preserve the original construction order.
 
-Targeting rules:
-- Every modification MUST identify a specific target:
-  - sketch
-  - extrude
-  - or one feature inside "features"
-- Feature targets MUST be matched by type, shape, and key dimensions.
-- If multiple matches exist, modify the closest match.
+━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT RULES (CRITICAL)
+━━━━━━━━━━━━━━━━━━━━━━
 
-Modification rules:
-- If a shape type changes, REPLACE the shape.
-- If only dimensions change, MODIFY dimensions only.
-- Do NOT explain or justify changes.
+- Output ONLY the FULL UPDATED augmented design description.
+- Output plain text ONLY.
+- Do NOT include explanations, comments, labels, or markdown.
+- Do NOT summarize changes.
+- Do NOT include the user's request in the output.
+- The output must be a complete, self-contained augmented description.
 
-Output rules (CRITICAL):
-- Output ONLY ONE JSON object.
-- The output MUST start with '{' and end with '}'.
-- Do NOT include explanations, comments, or text.
-- Do NOT include markdown.
-- If the target is ambiguous, choose the closest match and still output JSON.
+━━━━━━━━━━━━━━━━━━━━━━
+AMBIGUITY HANDLING
+━━━━━━━━━━━━━━━━━━━━━━
 
-Here is an Example Modified JSON:
-{
-  "existing_design": {
-    "sketch": {
-      "type": "square",
-      "size": 20
-    },
-    "extrude": {
-      "height": 2
-    },
-    "features": [
-      {
-        "type": "cut",
-        "shape": "circle",
-        "dimensions": {
-          "radius": 0.5,
-          "position_x": 10,
-          "position_y": 10,
-          "height": 2
-        }
-      },
-      {
-        "type": "add",
-        "shape": "cube",
-        "dimensions": {
-          "size": 1,
-          "position_x": 0,
-          "position_y": 0,
-          "position_z": 2
-        }
-      }
-    ],
-    "export_format": "stl"
-  }
-}
+- If the user's request is ambiguous, choose the closest practical interpretation.
+- Prioritize geometric stability and manufacturability.
+- Never leave any dimension or feature definition incomplete.
+
+━━━━━━━━━━━━━━━━━━━━━━
+MENTAL MODEL EXAMPLE (NOT OUTPUT)
+━━━━━━━━━━━━━━━━━━━━━━
+
+User request:
+"Make the central hole bigger"
+
+Action:
+- Identify the hole feature described as centered.
+- Increase its diameter while keeping it within face boundaries.
+- Leave all other geometry unchanged.
+- Output the full updated augmented description.
+- When modifying complex designs, prefer minimal localized changes
+  over global rescaling.
+━━━━━━━━━━━━━━━━━━━━━━
+FINAL CHECK (MANDATORY)
+━━━━━━━━━━━━━━━━━━━━━━
+
+Before outputting:
+- Ensure only requested changes were applied.
+- Ensure the description is internally consistent.
+- Ensure it can be directly translated into CadQuery code.
 
 """
 
-
-
 def modify_design_json(
     existing_json: Dict,
-    modification_text: str
-) -> Dict:
+    modification_text: str) -> Dict:
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
-            {"role": "system", "content": JSON_REFINER_SYSTEM_PROMPT},
+            {"role": "system", "content": TEXT_REFINER_SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": json.dumps({
@@ -98,9 +129,9 @@ def modify_design_json(
     )
 
     refined_json_str = response.choices[0].message.content.strip()
-    return json.loads(refined_json_str)
+    return refined_json_str
 
-def refine_existing_design(
+"""def refine_existing_design(
     existing_json_path: str,
     modification_text: str,
     JSON_ROOT: str,
@@ -124,7 +155,7 @@ def refine_existing_design(
         json.dump(updated_json, f, indent=2)
 
     # 4. Regenerate CADQuery code from updated JSON
-    process_all_json_files(
+    process_all_augmented_txt_files(
         JSON_ROOT=JSON_ROOT,
         OUTPUT_ROOT=CQ_CODE_DIR,
         limit=1
@@ -141,4 +172,4 @@ def save_versioned_json(json_data, original_path):
     new_path = original_path.replace(".json", f"_v{ts}.json")
     with open(new_path, "w") as f:
         json.dump(json_data, f, indent=2)
-    return new_path
+    return new_path"""

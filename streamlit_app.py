@@ -212,7 +212,9 @@ if st.session_state.stage == "modify":
                     )
                     
                 st.success("Modification applied!")
-            #st.rerun()
+                st.subheader("🔍 3D Preview (Interactive)")
+                render_stl_viewer(stl_path, height=500)
+        #st.rerun()
 
     with col2:
         if st.button("Terminate Design"):

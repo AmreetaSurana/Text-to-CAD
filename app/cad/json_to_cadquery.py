@@ -6,137 +6,217 @@ import json
 from app.config.settings import JSON_DIR, CADQUERY_DIR
 from app.LLM.client import client
 
-"""json to cad query PROMPT"""
+"""augmented description to cad query PROMPT"""
 
 SYSTEM_PROMPT = """
-You are an expert AutoCAD engineer specializing in CadQuery.
+You are a senior CAD engineer specializing in CadQuery and parametric solid modeling.
 
-Your task is to convert a structured CAD JSON specification into a
+Your task is to convert an AUGMENTED TEXT DESIGN DESCRIPTION into a
 VALID, EXECUTABLE, and GEOMETRICALLY SOLVABLE CadQuery Python script
 that produces a correct STL file.
 
-STRICT OUTPUT RULES (MANDATORY):
+The augmented text already contains clarified geometry, dimensions,
+constraints, and construction intent.
+You must strictly translate it into CadQuery code without interpretation
+or creative modification.
+
+━━━━━━━━━━━━━━━━━━━━━━
+STRICT OUTPUT RULES (MANDATORY)
+━━━━━━━━━━━━━━━━━━━━━━
 
 1. Output ONLY valid Python code.
 2. Do NOT include comments, explanations, markdown, or extra text.
 3. Use CadQuery API ONLY.
 4. Use millimeters as units.
 5. The output must be directly executable as a standalone Python file.
+6. Define a final variable named `assembly` containing the solid.
 
-MODEL CONSTRUCTION ORDER (MANDATORY):
+━━━━━━━━━━━━━━━━━━━━━━
+MODEL CONSTRUCTION ORDER (MANDATORY)
+━━━━━━━━━━━━━━━━━━━━━━
 
-6. Follow this exact order:
+7. Follow this exact order:
    Sketch → Extrude → Solid Modification.
-7. Never call faces(), edges(), workplane(), cut(), union(),
-   translate(), or rotate before a solid is created by extrude().
-8. All boolean operations must be applied ONLY to an existing solid.
-9. Do NOT mix sketch creation and solid modification in the same chain.
-10. Use procedural CadQuery style with intermediate variables.
+8. Never call faces(), edges(), workplane(), cut(), union(),
+   translate(), or rotate before a solid exists.
+9. All boolean operations must be applied ONLY to an existing solid.
+10. Do NOT mix sketch creation and solid modification in the same chain.
+11. Use procedural CadQuery style with intermediate variables.
 
-WORKPLANE CONSISTENCY RULES (CRITICAL):
+━━━━━━━━━━━━━━━━━━━━━━
+WORKPLANE & SKETCH RULES (CRITICAL)
+━━━━━━━━━━━━━━━━━━━━━━
 
-11. NEVER create a cut sketch on a separate Workplane object.
-12. All cut sketches MUST be created directly on the target face
-    using faces().workplane().
-13. NEVER pass a sketch object into cut() or union().
-14. NEVER reuse or reconstruct sketches.
-15. All sketches must be created inline and immediately consumed
-    by extrude(), cut(), or cutThruAll().
+12. Base sketches must be created on cq.Workplane("XY").
+13. All cut sketches MUST be created using:
+    solid.faces(selector).workplane()
+14. NEVER create a sketch on a separate Workplane for cutting.
+15. NEVER pass a sketch object into cut() or union().
+16. All sketches must be created inline and immediately consumed.
+17. NEVER reuse or reconstruct sketches.
 
-ARC AND CURVE RULES (MANDATORY):
+━━━━━━━━━━━━━━━━━━━━━━
+SKETCH VALIDITY RULES (MANDATORY)
+━━━━━━━━━━━━━━━━━━━━━━
 
-16. NEVER use radiusArc().
-17. radiusArc() is strictly forbidden.
-18. All arcs MUST be created using threePointArc() ONLY.
-19. A semi-circle MUST be constructed as:
+18. All sketches must be planar, closed, and non-self-intersecting.
+19. Never create zero-area sketches.
+20. Never rely on implicit sketch closure.
+21. Always explicitly close profiles.
+
+━━━━━━━━━━━━━━━━━━━━━━
+ARC AND CURVE RULES (MANDATORY)
+━━━━━━━━━━━━━━━━━━━━━━
+
+22. NEVER use radiusArc().
+23. radiusArc() is strictly forbidden.
+24. All arcs MUST be created using threePointArc() ONLY.
+25. A semi-circle MUST be constructed using:
     - one threePointArc(start → mid → end)
     - one straight line closing the diameter
     - an explicit .close() call
-20. Never assume CadQuery will auto-close sketch wires.
+26. Never assume CadQuery will auto-close sketch wires.
 
-SKETCH VALIDITY RULES (MANDATORY):
+━━━━━━━━━━━━━━━━━━━━━━
+COORDINATE SYSTEM RULES (CRITICAL)
+━━━━━━━━━━━━━━━━━━━━━━
 
-21. All sketches must be planar, closed, and non-self-intersecting.
-22. Never create sketches with zero area.
-23. Never create degenerate arcs.
-24. Never rely on implicit geometry behavior.
+27. All face workplanes use local 2D coordinates.
+28. Face center is always (0, 0).
+29. NEVER use world/global coordinates on face sketches.
+30. Feature placement must use workplane().center(x, y).
+31. Do NOT embed absolute coordinates into sketch geometry.
 
-COORDINATE SYSTEM RULES (CRITICAL):
+━━━━━━━━━━━━━━━━━━━━━━
+CUT SAFETY RULES (MANDATORY)
+━━━━━━━━━━━━━━━━━━━━━━
 
-25. All sketches on faces MUST use local 2D coordinates.
-26. NEVER use world/global coordinates inside face workplanes.
-27. Feature positioning must be done ONLY using workplane().center().
-28. Do NOT embed absolute coordinates into sketch geometry.
+32. All cut sketches MUST lie strictly inside the target face.
+33. Maintain a minimum clearance margin of 0.1 mm from all face edges.
+34. Never allow a cut sketch to touch or cross a face boundary.
+35. Ensure (feature_size * 2) < face_dimension.
+36. cutThruAll() must never remove the entire solid.
 
-CUT SAFETY RULES (MANDATORY):
+━━━━━━━━━━━━━━━━━━━━━━
+GEOMETRY CONSTRAINT RULES
+━━━━━━━━━━━━━━━━━━━━━━
 
-29. All cut sketches MUST lie strictly inside the target face.
-30. Maintain a minimum clearance margin of 0.1 mm from all face edges.
-31. Never allow a cut sketch to touch or cross a face boundary.
-32. Ensure (feature_size * 2) < face_dimension.
-33. cutThruAll() must never remove the entire solid volume.
+37. All dimensions must be strictly positive.
+38. Clamp all numeric values to a minimum of 0.1 mm BEFORE use.
+39. Extrusion depth must be > 0.
+40. Inner sketches must be strictly smaller than outer sketches.
+41. Cuts and holes must not fully remove the solid.
+42. faces() selectors must always be applied to an existing solid.
+43. If a face selector could be ambiguous, avoid it.
 
-GEOMETRY CONSTRAINT RULES:
+━━━━━━━━━━━━━━━━━━━━━━
+FORBIDDEN CADQUERY USAGE (STRICT)
+━━━━━━━━━━━━━━━━━━━━━━
 
-34. All dimensions must be strictly positive.
-35. Clamp all numeric values to a minimum of 0.1 mm BEFORE use.
-36. Extrusion depth must be > 0.
-37. Inner sketches must be strictly smaller than outer sketches.
-38. Cuts and holes must not fully remove the solid.
-39. faces() selectors must always be applied to an existing solid.
-40. If a face selector could be ambiguous, assume failure and avoid it.
+44. NEVER access .objects, .Vertices, .Edges, or OCC internals.
+45. NEVER subscript CadQuery objects.
+46. NEVER loop through geometry objects.
+47. NEVER extrude a cut profile.
+48. NEVER cut the same feature more than once.
 
-FORBIDDEN CADQUERY USAGE (STRICT):
+━━━━━━━━━━━━━━━━━━━━━━
+CUT EXECUTION RULES (CRITICAL)
+━━━━━━━━━━━━━━━━━━━━━━
 
-41. NEVER access .objects, .Vertices, .Edges, or OCC internals.
-42. NEVER subscript CadQuery objects.
-43. NEVER loop through geometry objects.
-44. NEVER cut the same feature more than once.
-45. NEVER extrude a cut profile.
+49. NEVER assign a sketch to a variable for later cutting.
+50. NEVER pass a sketch or Workplane into cut().
+51. All cuts MUST be performed inline using:
+    solid.faces(...).workplane().<sketch>.cutThruAll()
+52. If a sketch is stored in a variable, it MUST NOT be used for cutting.
 
-FINALIZATION RULES:
+━━━━━━━━━━━━━━━━━━━━━━
+KERNEL ROBUSTNESS RULES (MANDATORY)
+━━━━━━━━━━━━━━━━━━━━━━
 
-46. Define a final variable named assembly containing the solid.
+53. NEVER create sketches with exact arc-line tangency.
+54. Break arc endpoints using a small epsilon (~1e-3 mm).
+55. Never rely on exact geometric coincidence.
+56. Prefer slightly undercut geometry over exact fits.
 
-FINAL VALIDATION (MANDATORY):
+━━━━━━━━━━━━━━━━━━━━━━
+SOLID BOOLEAN SAFETY RULES (MANDATORY)
+━━━━━━━━━━━━━━━━━━━━━━
 
-47. Ensure the final object is a valid solid with non-zero volume.
-48. Ensure no operation produces a null or empty shape.
-49. If any rule is violated, regenerate the script correctly.
+57. NEVER use split() to create partial solids.
+58. NEVER rely on tangent-only contact for boolean operations.
+59. All solids used in union() or cut() MUST overlap in volume.
+60. Ensure at least 0.1 mm penetration before boolean union.
+61. NEVER create hemispheres by splitting spheres.
 
-CUT EXECUTION RULES (CRITICAL):
+━━━━━━━━━━━━━━━━━━━━━━
+FINAL VALIDATION (MANDATORY)
+━━━━━━━━━━━━━━━━━━━━━━
 
-50. NEVER assign a sketch to a variable for later cutting.
-51. NEVER pass a sketch or Workplane into cut().
-52. All cuts MUST be performed inline using:
-  solid.faces(...).workplane().<sketch>.cutThruAll()
-53. If a sketch is stored in a variable, it MUST NOT be used for cutting.
+62. Ensure the final object is a valid solid with non-zero volume.
+63. Ensure no operation produces a null or empty shape.
+64. If any rule is violated, regenerate the script correctly.
 
-KERNEL ROBUSTNESS RULES (MANDATORY):
+━━━━━━━━━━━━━━━━━━━━━━
+COMPLEXITY MANAGEMENT RULES (MANDATORY):
+━━━━━━━━━━━━━━━━━━━━━━
 
-54. NEVER create sketches with exact arc-line tangency.
-55. Break all arc endpoints with a small epsilon (≈1e-3 mm).
-56. Never rely on exact geometric coincidence.
-57. Prefer slightly undercut geometry over exact fits.
+65. If the augmented description contains multiple distinct shapes or many features,
+  decompose the design into logical sub-solids or feature groups.
+66. Construct each major solid sequentially using independent variables.
+67. Apply boolean union() ONLY after each sub-solid is valid.
+68. Never attempt to model more than one logical solid in a single sketch–extrude chain.
+69. Prefer multiple simple operations over a single complex operation.
+70. If feature count exceeds reasonable stability (≈5 per face),
+  split features across multiple construction steps.
 
-FACE COORDINATE RULES (MANDATORY):
+━━━━━━━━━━━━━━━━━━━━━━
+DIMENSION INFERENCE RULES (MANDATORY):
+━━━━━━━━━━━━━━━━━━━━━━
 
-58. All face workplanes use local coordinates.
-59. Face center is (0, 0).
-60. NEVER place features using absolute size-based coordinates.
-61. All feature positioning must be relative to the face center.63.- If a feature position equals or exceeds half the face size,
-  reduce or recenter the feature.
+71. If a dimension is not explicitly specified in the augmented text,
+  infer a reasonable default and DEFINE IT EXPLICITLY in code.
+72. Use proportional sizing relative to the base sketch dimensions.
+73. Default assumptions (unless overridden):
+  * Base plate thickness: 5 mm
+  * Feature depth: 50–80% of parent thickness
+  * Hole diameter: 10–20% of smallest face dimension
+  * Fillets or rounds (if implied): 1–2 mm
+74. Never leave a dimension implicit or symbolic.
+75. All inferred dimensions must preserve structural integrity
+  and avoid feature overlap or face boundary violation.
 
-SOLID BOOLEAN SAFETY RULES (MANDATORY):
+━━━━━━━━━━━━━━━━━━━━━━  
+COMPLEXITY FALLBACK RULE (CRITICAL):
+━━━━━━━━━━━━━━━━━━━━━━
 
-62. NEVER use split() to create partial solids.
-63. NEVER rely on tangent-only contact for boolean operations.
-64. All solids used in union() or cut() MUST overlap in volume.
-65. Prefer revolve() or extrude() over split() for solid creation.
-66. Ensure at least 0.1 mm penetration before any boolean union.
+76. If the augmented description is too complex to safely model in one pass,
+  prioritize primary geometry first.
+77. Omit secondary decorative or non-structural details.
+78. Preserve overall shape, proportions, and key functional features.
+79. Stability and validity always take precedence over completeness.
 
-67. NEVER create hemispheres by splitting spheres.
-68. NEVER call split() after sphere().
+━━━━━━━━━━━━━━━━━━━━━━
+THREAD MODELING RULES (CRITICAL)
+━━━━━━━━━━━━━━━━━━━━━━ 
+80. Do NOT generate true helical threads by default.
+81. If a threaded feature is described:
+  - Represent threads as a simplified cosmetic approximation
+    (e.g., cylindrical shaft with nominal outer diameter).
+82. True helical threads may ONLY be generated if explicitly requested
+  and must use CadQuery's built-in helix() API.
+83. NEVER use parametricCurve() to construct helical paths.
+
+━━━━━━━━━━━━━━━━━━━━━━
+THREAD MODELING RULES (CRITICAL):
+━━━━━━━━━━━━━━━━━━━━━━
+
+84. Do NOT generate true helical threads by default.
+85. If a threaded feature is described:
+  - Represent threads as a simplified cosmetic approximation
+    (e.g., cylindrical shaft with nominal outer diameter).
+86. True helical threads may ONLY be generated if explicitly requested
+  and must use CadQuery's built-in helix() API.
+87. NEVER use parametricCurve() to construct helical paths.
 
 
 Example Output file looks like:
@@ -198,12 +278,10 @@ If not correct that query and re generate.
 
 #json to CAD query code generation function
 
-def json_to_CADquery(cad_json: Dict[str, Any]) -> str:
+def augmented_text_to_CADquery(augmented_text: str) -> str:
     """
-    Convert CAD JSON directly into executable CADQuery code using an LLM.
+    Convert augmented design description text into executable CadQuery code using an LLM.
     """
-    # Normalize JSON string (important for determinism)
-    json_str = json.dumps(cad_json, indent=2, sort_keys=True)
 
     messages = [
         {
@@ -213,47 +291,48 @@ def json_to_CADquery(cad_json: Dict[str, Any]) -> str:
         {
             "role": "user",
             "content": (
-                "Convert the following CAD JSON into CADQuery Python code.\n\n"
-                "JSON:\n"
-                f"{json_str}"
+                "Convert the following AUGMENTED DESIGN DESCRIPTION into "
+                "VALID, EXECUTABLE CadQuery Python code.\n\n"
+                "AUGMENTED DESCRIPTION:\n"
+                f"{augmented_text}"
             )
         }
     ]
 
     response = client.chat.completions.create(
-        model="ignored",        # deployment comes from base_url
+        model="ignored",
         messages=messages,
-        temperature=0.0,       # 0.0 for maximum determinism
+        temperature=0.0,
         max_tokens=2500,
-        stop=None              # do NOT add stop tokens
+        stop=None
     )
 
     cadquery_code = response.choices[0].message.content.strip()
-
     return cadquery_code
 
 #reading the json file and creating the needed output path for saving the required details
 
-def get_all_json_files(root_dir: str) -> List[str]:
+def get_all_txt_files(root_dir: str) -> List[str]:
     """
-    #Recursively collect all .json files under root_dir.
+    Recursively collect all .txt files under root_dir.
     """
-    json_files = []
+    txt_files = []
     for dirpath, dirnames, filenames in os.walk(root_dir):
         for fname in filenames:
-            if fname.lower().endswith(".json"):
-                json_files.append(os.path.join(dirpath, fname))
-    return json_files
+            if fname.lower().endswith(".txt"):
+                txt_files.append(os.path.join(dirpath, fname))
+    return txt_files
 
 
-def get_output_path(input_path: str, input_root: str, output_root: str, ext: str = ".cad.py") -> str:
+
+def get_output_path( input_path: str, input_root: str, output_root: str, ext: str = ".cad.py") -> str:
     """
-    Given an input JSON path, construct a mirrored output path
+    Given an input TXT path, construct a mirrored output path
     under output_root with the given extension.
     """
-    rel_path = os.path.relpath(input_path, input_root)   # e.g. design_set_01/part_a.json
-    base_no_ext = os.path.splitext(rel_path)[0]          # design_set_01/part_a
-    out_rel_path = base_no_ext + ext                     # design_set_01/part_a.cad.py
+    rel_path = os.path.relpath(input_path, input_root)
+    base_no_ext = os.path.splitext(rel_path)[0]
+    out_rel_path = base_no_ext + ext
     out_full_path = os.path.join(output_root, out_rel_path)
 
     out_dir = os.path.dirname(out_full_path)
@@ -261,56 +340,59 @@ def get_output_path(input_path: str, input_root: str, output_root: str, ext: str
 
     return out_full_path
 
+
 """processing everything and calling all the functions."""
 
-def process_all_json_files(
+def process_all_augmented_txt_files(
     input_root: str,
     output_root: str,
     simulate: bool = False,
     limit: int = None
 ):
     """
-    Iterate over all JSON files, call Azure OpenAI, and save CAD Query Code.
-
-    Args:
-        input_root: base folder containing all JSON folders.
-        output_root: base folder where CAD scripts will be saved (mirrored structure).
-        simulate: if True, do not call LLM, just print planned actions.
-        limit: if set, process at most this many files (for testing).
+    Iterate over all augmented TXT files, call Azure OpenAI,
+    and save CadQuery Python scripts.
     """
-    json_files = get_all_json_files(input_root)
-    print(f"Found {len(json_files)} JSON files.")
+    txt_files = get_all_txt_files(input_root)
+    print(f"Found {len(txt_files)} augmented TXT files.")
 
     if limit is not None:
-        json_files = json_files[:limit]
-        print(f"Limiting to first {len(json_files)} files for this run.")
+        txt_files = txt_files[:limit]
+        print(f"Limiting to first {len(txt_files)} files for this run.")
 
-    for idx, json_path in enumerate(json_files, start=1):
+    for idx, txt_path in enumerate(txt_files, start=1):
         try:
-            print(f"[{idx}/{len(json_files)}] Processing: {json_path}")
+            print(f"[{idx}/{len(txt_files)}] Processing: {txt_path}")
 
-            # Read JSON
-            with open(json_path, "r") as f:
-                data = json.load(f)
+            # Read augmented text
+            with open(txt_path, "r", encoding="utf-8") as f:
+                augmented_text = f.read().strip()
 
-            out_path = get_output_path(json_path, input_root, output_root)
+            if not augmented_text:
+                raise ValueError("Augmented description is empty.")
+
+            out_path = get_output_path(txt_path, input_root, output_root)
 
             if simulate:
-                print(f"  -> Would write CAD Query to: {out_path}")
+                print(f"  -> Would write CadQuery to: {out_path}")
                 continue
 
             # Call LLM
-            cadquery = json_to_CADquery(data)
+            cadquery_code = augmented_text_to_CADquery(augmented_text)
 
             # Save output
-            with open(out_path, "w") as f:
-                f.write(cadquery)
+            with open(out_path, "w", encoding="utf-8") as f:
+                f.write(cadquery_code)
 
-            print(f" -> Wrote CAD Query to: ")
+            print(f" -> Wrote CadQuery to: {out_path}")
 
         except Exception as e:
-            print(f" !! Error processing {json_path}: {e}")
+            print(f" !! Error processing {txt_path}: {e}")
+
 
 #json to cad query code
+#process_all_augmented_txt_files(JSON_DIR,CADQUERY_DIR,simulate=False,limit=1)
 
-process_all_json_files(JSON_DIR, CADQUERY_DIR, simulate=False, limit=1)
+#process_all_json_files(JSON_DIR, CADQUERY_DIR, simulate=False, limit=1)
+
+#changes done here
