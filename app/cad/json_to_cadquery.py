@@ -1,9 +1,5 @@
-
-from dotenv import load_dotenv
-from typing import List, Dict, Any
+from typing import List
 import os
-import json
-from app.config.settings import JSON_DIR, CADQUERY_DIR
 from app.LLM.client import client
 
 """augmented description to cad query PROMPT"""
@@ -218,6 +214,107 @@ THREAD MODELING RULES (CRITICAL):
   and must use CadQuery's built-in helix() API.
 87. NEVER use parametricCurve() to construct helical paths.
 
+━━━━━━━━━━━━━━━━━━━━━━
+PROJECTION-FREE MODELING (CRITICAL)
+━━━━━━━━━━━━━━━━━━━━━━
+
+The model MUST avoid geometry that requires implicit projection onto curved
+or trimmed faces.
+
+STRICT RULES:
+- NEVER call workplane() on a curved face.
+- NEVER create sketches on spherical, cylindrical, or trimmed faces.
+- NEVER rely on split() for construction.
+- Prefer primitive boolean operations (union, intersect) over trimming.
+- All hemispheres and domes MUST be created using boolean intersection
+  with planar half-space solids.
+
+If a feature requires projection onto a curved face, the feature MUST be
+simplified or omitted.
+
+━━━━━━━━━━━━━━━━━━━━━━
+CANONICAL FEATURE LIBRARY (MANDATORY)
+━━━━━━━━━━━━━━━━━━━━━━
+
+The model MUST construct geometry ONLY using the following canonical
+feature patterns. Arbitrary or creative modeling strategies are forbidden.
+
+For every described feature:
+1. Identify the closest canonical feature.
+2. Apply ONLY the allowed construction method.
+3. If no canonical feature applies, simplify or omit the feature.
+
+──────────────────────
+BASE SOLIDS (REQUIRED)
+──────────────────────
+
+Every model MUST start with exactly ONE base solid:
+
+- Rectangular plate / block:
+  cq.Workplane("XY").rect(w, h).extrude(t)
+
+- Cylindrical base:
+  cq.Workplane("XY").circle(r).extrude(t)
+
+No other base construction methods are allowed.
+
+──────────────────────
+CUT FEATURES
+──────────────────────
+
+Allowed:
+- face.workplane().circle(r).cutThruAll()
+- face.workplane().circle(r).cut(depth)
+- face.workplane().rect(w, h).cut(depth)
+
+Forbidden:
+- Boolean subtraction using separate solids
+- Extruding negative solids
+- Sketches outside the target face
+
+──────────────────────
+BOSS / RAISED FEATURES
+──────────────────────
+
+Allowed:
+- face.workplane().rect(w, h).extrude(h)
+- face.workplane().circle(r).extrude(h)
+
+Boss height must not exceed 80% of parent thickness unless specified.
+
+──────────────────────
+DOMES & HEMISPHERES (CRITICAL)
+──────────────────────
+
+Hemispheres and domes MUST be constructed ONLY using:
+
+- Full sphere creation
+- Planar trimming or cutting
+- Boolean union with volumetric overlap
+
+Explicitly FORBIDDEN:
+- Revolving semicircles
+- Tangent-only unions
+- Splitting spheres as a primary operation
+- revolve() on YZ or XZ planes
+
+──────────────────────
+BOOLEAN SAFETY (REQUIRED)
+──────────────────────
+
+All boolean unions MUST:
+- Overlap by at least 0.1 mm
+- Never rely on tangent contact
+- Never align exactly on a face plane
+
+──────────────────────
+FALLBACK RULE
+──────────────────────
+
+If a requested feature cannot be safely modeled using a canonical pattern:
+- Simplify the feature
+- Preserve overall proportions
+- Prefer validity over completeness
 
 Example Output file looks like:
 Output =
