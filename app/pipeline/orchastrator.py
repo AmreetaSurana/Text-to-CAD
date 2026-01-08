@@ -1,5 +1,4 @@
 
-import json
 import uuid
 import os
 from app.config.settings import JSON_DIR, CADQUERY_DIR, STL_DIR

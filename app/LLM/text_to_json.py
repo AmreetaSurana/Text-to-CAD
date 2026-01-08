@@ -96,6 +96,25 @@ IMPORTANT CONSTRAINTS
 - Favor stability and manufacturability over artistic interpretation.
 
 ━━━━━━━━━━━━━━━━━━━━━━
+CRITICAL OUTPUT ENCODING RULE:
+━━━━━━━━━━━━━━━━━━━━━━
+
+- Output MUST be valid UTF-8 plain text.
+- Output MUST contain ONLY ASCII characters (character codes 32–126).
+- Do NOT use:
+  - mathematical symbols (±, µ, ∅, °, ≥, ≤, etc.)
+  - smart quotes or typographic characters
+  - bullets or special Unicode characters
+  - invisible or control characters
+- Use ONLY:
+  - letters a–z, A–Z
+  - digits 0–9
+  - standard punctuation: . , : ; ( ) [ ] { }
+- If a concept normally requires a special symbol, SPELL IT OUT in words instead.
+
+Any violation of this rule is considered an invalid output.
+
+━━━━━━━━━━━━━━━━━━━━━━
 EXAMPLE TRANSFORMATION (MENTAL MODEL)
 ━━━━━━━━━━━━━━━━━━━━━━
 

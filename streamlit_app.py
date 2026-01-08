@@ -13,7 +13,7 @@ from app.config.settings import JSON_DIR, STL_DIR, CADQUERY_DIR
 # ==========================================================
 # STL VIEWER
 # ==========================================================
-def render_stl_viewer(stl_path, height=500):
+def render_stl_viewer(stl_path, height=200):
     with open(stl_path, "rb") as f:
         stl_bytes = f.read()
 
@@ -127,19 +127,42 @@ if st.session_state.stage == "initial":
 # ==========================================================
 # STAGE 2 — ACTIVE DESIGN (PREVIEW + MODIFY)
 # ==========================================================
+if "last_action" not in st.session_state:
+    st.session_state.last_action = None
+
+if "last_message" not in st.session_state:
+    st.session_state.last_message = None
+
 if st.session_state.stage == "active":
 
     design = st.session_state.design
 
     st.markdown("### 📝 Original Design Description")
     st.info(design["description"])
+    st.markdown("---")
+    
+    if st.session_state.last_action == "modify":
+        st.success(st.session_state.last_message)
+        st.session_state.last_action = None
+        st.session_state.last_message = None
+
+    elif st.session_state.last_action == "error":
+        st.error(st.session_state.last_message)
+        st.session_state.last_action = None
+        st.session_state.last_message = None
+
 
     # ---- Load latest STL
-    stl_files = sorted(
-        [f for f in os.listdir(design["stl_dir"]) if f.endswith(".stl")],
-        key=lambda f: os.path.getmtime(os.path.join(design["stl_dir"], f))
-    )
+    stl_files = [
+        f for f in os.listdir(design["stl_dir"])
+        if f.lower().endswith(".stl")
+    ]
 
+    if not stl_files:
+        st.error("No STL generated yet.")
+        st.stop()
+
+    stl_files.sort(key=lambda f: os.path.getmtime(os.path.join(design["stl_dir"], f)))
     stl_path = os.path.join(design["stl_dir"], stl_files[-1])
 
     st.subheader("🔍 Design Preview")
@@ -164,13 +187,19 @@ if st.session_state.stage == "active":
                 with st.spinner("Applying modification..."):
                     try:
                         refine_existing_design(design["json_path"], modification)
-                        st.success("Modification applied.")
-                        st.rerun()
+
+                        # Persist success across rerun
+                        st.session_state.last_action = "modify"
+                        st.session_state.last_message = "✅ Modification applied successfully."
+
                     except Exception as e:
-                        st.error(f"Modification failed: {e}")
+                        st.session_state.last_action = "error"
+                        st.session_state.last_message = f"❌ Modification failed: {e}"
                         st.session_state.stage = "terminate"
                         st.session_state.terminate_popup = True
-                        st.rerun()
+
+                st.rerun()
+
 
     with col2:
         if st.button("Terminate Design"):
@@ -201,7 +230,7 @@ if st.session_state.stage == "terminate" and st.session_state.terminate_popup:
     stl_path = os.path.join(design["stl_dir"], stl_files[-1])
 
     st.subheader("🔍 Final Design Preview")
-    render_stl_viewer(stl_path, height=500)
+    render_stl_viewer(stl_path, height=200)
 
     st.divider()
 
