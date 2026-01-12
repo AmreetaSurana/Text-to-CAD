@@ -1,5 +1,3 @@
-
-from dotenv import load_dotenv
 from typing import List, Dict, Any
 import os
 import json
@@ -223,7 +221,7 @@ def json_to_CADquery(cad_json: Dict[str, Any]) -> str:
     response = client.chat.completions.create(
         model="ignored",        # deployment comes from base_url
         messages=messages,
-        temperature=0.0,       # 0.0 for maximum determinism
+        temperature=0.5,       # 0.0 for maximum determinism
         max_tokens=2500,
         stop=None              # do NOT add stop tokens
     )

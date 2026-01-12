@@ -21,25 +21,6 @@ ABSOLUTE RULES (no exceptions):
 9. Use simple, deterministic field names only.
 10. Always include "export_format": "stl".
 
-JSON STRUCTURE (must follow exactly):
-{
-  "sketch": {
-    "type": "square",
-    "size": number
-  },
-  "extrude": {
-    "height": number
-  },
-  "features": [
-    {
-      "type": "cut" | "hole",
-      "shape": "circle" | "semi_circle",
-      "dimensions": { }
-    }
-  ],
-  "export_format": "stl"
-}
-
 Failure to follow these rules is unacceptable.
 """
 
