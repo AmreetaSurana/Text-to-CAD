@@ -13,7 +13,7 @@ from app.config.settings import JSON_DIR, STL_DIR, CADQUERY_DIR
 # ==========================================================
 # STL VIEWER
 # ==========================================================
-def render_stl_viewer(stl_path, height=200):
+def render_stl_viewer(stl_path, height=500):
     with open(stl_path, "rb") as f:
         stl_bytes = f.read()
 
@@ -230,7 +230,7 @@ if st.session_state.stage == "terminate" and st.session_state.terminate_popup:
     stl_path = os.path.join(design["stl_dir"], stl_files[-1])
 
     st.subheader("🔍 Final Design Preview")
-    render_stl_viewer(stl_path, height=200)
+    render_stl_viewer(stl_path, height=500)
 
     st.divider()
 
